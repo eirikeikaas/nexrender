@@ -6,6 +6,7 @@ const uri2path = require('file-uri-to-path')
 const data2buf = require('data-uri-to-buffer')
 const mime = require('mime-types')
 const {expandEnvironmentVariables} = require('../helpers/path')
+const extract = require('extract-zip')
 
 // TODO: redeuce dep size
 const requireg = require('requireg')
@@ -153,8 +154,38 @@ module.exports = function(job, settings) {
 
     const promises = [].concat(
         download(job, settings, job.template),
-        job.assets.map(asset => download(job, settings, asset))
+        job.assets.map(asset => download(job, settings, asset)),
     )
 
-    return Promise.all(promises).then(_ => job);
+    if (job.assetArchive) {
+        promises.push(download(job, settings, job.assetArchive));
+    }
+
+    return Promise.all(promises)
+        .then(_ => {
+            if(job.unzip) {
+                return new Promise((resolve, reject) => {
+                    fs.readdir(job.workpath, (error, files) => {
+                        if (error) {
+                            reject(error);
+                        } else {
+                            resolve(files);
+                        }
+                    });
+                }).then(files => {
+                    const promises = files
+                        .filter(file => path.extname(file) === '.zip')
+                        .map(file => {
+                            settings.logger.log(`[${job.uid}] unzipping assets...`);
+
+                            return extract(file, { dir: job.workpath });
+                        });
+                    
+                    return Promise.all(promises);
+                });
+            } else {
+                return Promise.resolve();
+            }
+        })
+        .then(() => job)
 }
